@@ -1,7 +1,7 @@
 Feature: Hospital API Testing
-  As a healthcare management system
-  I want to manage hospital information
-  So that I can track hospital visits and maintain accurate records
+  As a health-tech startup
+  I want to manage doctor information
+  So that I can maintain accurate doctor records and associations
 
   Background:
     Given the API server is running

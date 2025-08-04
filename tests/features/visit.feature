@@ -1,7 +1,7 @@
 Feature: Visit API Testing
-  As a healthcare sales system
-  I want to manage visit information
-  So that I can track sales visits and their outcomes
+  As a health-tech startup
+  I want to manage doctor information
+  So that I can maintain accurate doctor records and associations
 
   Background:
     Given the API server is running

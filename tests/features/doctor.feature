@@ -1,5 +1,5 @@
 Feature: Doctor API Testing
-  As a healthcare management system
+  As a health-tech startup
   I want to manage doctor information
   So that I can maintain accurate doctor records and associations
 
