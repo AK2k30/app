@@ -1,19 +1,47 @@
 {
-  "name": "app",
-  "version": "1.0.50",
+  "name": "hs-salesops-backend",
+  "version": "1.0.19b",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "prisma:generate": "bunx prisma generate --schema ./prisma/schema.prisma",
+    "test": "cucumber-js --config cucumber.cjs",
+    "test:html": "cucumber-js --config cucumber.cjs --format html:reports/cucumber-report.html",
+    "dev": "bun run --watch src/index.ts",
+    "start:prod": "bun run --watch src/index.ts"
   },
   "dependencies": {
+    "@bogeychan/elysia-oauth2": "^0.0.22",
     "@elysiajs/cors": "^1.3.3",
-    "@elysiajs/swagger": "^1.3.0",
-    "@prisma/client": "^6.8.2",
+    "@elysiajs/swagger": "^1.3.1",
+    "@grotto/logysia": "^0.1.6",
+    "@gtramontina.com/elysia-error-handler": "1.0.1",
+    "@otherguy/elysia-logging": "^0.0.16",
+    "@prisma/client": "5.21.1",
+    "@sinclair/typebox": "^0.34.37",
+    "arctic": "^1.9.2",
+    "argon2": "^0.40.3",
+    "csv-parse": "^5.6.0",
+    "csv-parser": "^3.2.0",
     "elysia": "latest",
-    "prisma": "^6.8.2"
+    "elysia-oauth2": "^1.3.0",
+    "elysia-session": "^0.0.5",
+    "jose": "^4.15.9",
+    "picocolors": "^1.1.1",
+    "pino": "^8.21.0",
+    "prisma": "5.21.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "@cucumber/cucumber": "^10.3.1",
+    "@types/node": "^20.11.19",
+    "cucumber-html-reporter": "^7.1.1",
+    "ts-node": "^10.9.2",
+    "node-fetch": "^2.7.0",
+    "@types/node-fetch": "^2.6.11"
   },
-  "module": "src/index.js"
+  "module": "src/index.js",
+  "type": "module",
+  "peerDependencies": {
+    "typescript": "^5.8.3"
+  }
 }

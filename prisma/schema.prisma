@@ -540,14 +540,17 @@ model Product_Catalogue {
 }
 
 model Schema {
-  id                              String @id @default(auto()) @map("_id") @db.ObjectId
-  INTIMATION_FORM_SCHEMA          Json
-  INTIMATION_UI_SCHEMA            Json
-  VISIT_FORM_SCHEMA               Json
-  VISIT_UI_SCHEMA                 Json
+  id                     String @id @default(auto()) @map("_id") @db.ObjectId
+  INTIMATION_FORM_SCHEMA Json
+  INTIMATION_UI_SCHEMA   Json
+  VISIT_FORM_SCHEMA      Json
+  VISIT_UI_SCHEMA        Json
 
   CREATE_ORGANIZATION_FORM_SCHEMA Json
   CREATE_ORGANIZATION_UI_SCHEMA   Json
+
+  CREATE_CUSTOMER_FROM_SCHEMA Json
+  CREATE_CUSTOMER_UI_SCHEMA   Json
 
   PLAN_VISIT_SCHEMA    Json
   PLAN_VISIT_UI_SCHEMA Json
@@ -583,6 +586,7 @@ model Intimation {
   SALES_PERSON_ID            String
   NOTE                       String?
   STATUS                     String?                @default("Pending")
+  DELETION_REASON            String?
   data                       Json
   ManagerId                  String?
   ManagerEmail               String?
@@ -701,25 +705,6 @@ enum Profession {
   DOCTOR
   OTHER
 }
-
-// model VwUser {
-//   id             String   @id @default(auto()) @map("_id") @db.ObjectId
-//   username       String
-//   name           String
-//   email          String
-//   role           String
-//   hash           String
-//   salt           String
-//   password       String
-//   provider       String
-//   createdAt      DateTime
-//   updatedAt      DateTime
-//   managerId      String?  @db.ObjectId
-//   managerEmail   String?
-//   managersEmails String[]
-
-//   @@map("VwUser")
-// }
 
 model Hospital_2 {
   id                  String        @id @default(auto()) @map("_id") @db.ObjectId
