@@ -1104,6 +1104,335 @@ app.get(`/api/v1/visit/doctors`, async (c: Context) => {
     }
 });
 
+// NEW API ENDPOINTS WITHOUT ROLE-BASED FILTERING - SALES PERSON EMAIL PARAMETER
+
+// API endpoint for getting visit information by sales person email
+app.get(`/api/v1/sales/visits/:salesPersonEmail`, async (c: Context<{ params: { salesPersonEmail: string } }>) => {
+    try {
+        const { salesPersonEmail } = c.params;
+
+        if (!salesPersonEmail) {
+            c.set.status = 400;
+            return {
+                status: 400,
+                success: false,
+                message: 'Sales person email parameter is required'
+            };
+        }
+
+        // Decode the email parameter
+        const decodedEmail = decodeURIComponent(salesPersonEmail);
+
+        // Fetch visit information for the specific sales person
+        const visitInformationData = await db.visit_Information.findMany({
+            select: {
+                id: true,
+                HAPLID: true,
+                YOUR_NAME: true,
+                VISIT_TYPE: true,
+                STATUS: true,
+                DOCTOR_NAME: true,
+                HOSPITAL_NAME: true,
+                CLIENT_NAME: true,
+                EMAIL: true,
+                createdAt: true,
+                UserDetails: {
+                    select: {
+                        name: true,
+                        email: true,
+                    }
+                }
+            },
+            where: {
+                EMAIL: decodedEmail,
+                STATUS: {
+                    not: null
+                }
+            },
+            orderBy: {
+                createdAt: "desc",
+            }
+        });
+
+        // Get total count for metadata
+        const totalCount = visitInformationData.length;
+
+        // Format the response
+        const formattedData = visitInformationData.map(visit => ({
+            id: visit.id,
+            haplId: visit.HAPLID,
+            salesPersonName: visit.YOUR_NAME,
+            salesPersonEmail: visit.EMAIL,
+            visitType: visit.VISIT_TYPE,
+            visitStatus: visit.STATUS,
+            doctorName: visit.DOCTOR_NAME,
+            hospitalName: visit.HOSPITAL_NAME,
+            clientName: visit.CLIENT_NAME,
+            createdAt: visit.createdAt,
+            userDetails: visit.UserDetails
+        }));
+
+        c.set.status = 200;
+        return {
+            status: c.set.status,
+            success: true,
+            data: {
+                visits: formattedData,
+                metadata: {
+                    totalCount,
+                    salesPersonEmail: decodedEmail,
+                    fetchedAt: new Date().toISOString(),
+                }
+            },
+            message: `Visit information for ${decodedEmail} retrieved successfully. Total records: ${totalCount}`,
+        };
+    } catch (error: any) {
+        console.error("Error fetching visit information by sales person email:", error);
+        c.set.status = 500;
+        return {
+            status: c.set.status,
+            success: false,
+            message: error.message || "Internal Server Error while fetching visit information",
+        };
+    }
+});
+
+// API endpoint for getting hospitals visited by sales person email
+app.get(`/api/v1/sales/hospitals/:salesPersonEmail`, async (c: Context<{ params: { salesPersonEmail: string } }>) => {
+    try {
+        const { salesPersonEmail } = c.params;
+
+        if (!salesPersonEmail) {
+            c.set.status = 400;
+            return {
+                status: 400,
+                success: false,
+                message: 'Sales person email parameter is required'
+            };
+        }
+
+        // Decode the email parameter
+        const decodedEmail = decodeURIComponent(salesPersonEmail);
+
+        // Fetch hospitals visited by the specific sales person
+        const visitedHospitalsData = await db.visit_Information.findMany({
+            select: {
+                id: true,
+                HAPLID: true,
+                HOSPITAL_NAME: true,
+                YOUR_NAME: true,
+                STATUS: true,
+                EMAIL: true,
+                createdAt: true,
+                UserDetails: {
+                    select: {
+                        name: true,
+                        email: true,
+                    }
+                }
+            },
+            where: {
+                EMAIL: decodedEmail,
+                STATUS: {
+                    in: ["COMPLETED", "AD_HOC"]
+                }
+            },
+            orderBy: {
+                createdAt: "desc",
+            }
+        });
+
+        // Group hospitals by name and collect visit information
+        const hospitalMap = new Map();
+
+        visitedHospitalsData.forEach(visit => {
+            const hospitalName = visit.HOSPITAL_NAME;
+
+            if (!hospitalMap.has(hospitalName)) {
+                hospitalMap.set(hospitalName, {
+                    id: visit.id,
+                    haplId: visit.HAPLID,
+                    hospitalName: visit.HOSPITAL_NAME,
+                    salesPersonName: visit.YOUR_NAME,
+                    salesPersonEmail: visit.EMAIL,
+                    visitStatus: visit.STATUS,
+                    userDetails: visit.UserDetails,
+                    totalVisits: 0,
+                    visitDate: visit.createdAt, // Latest visit date
+                    firstVisitDate: visit.createdAt,
+                    allVisitDates: []
+                });
+            }
+
+            const hospital = hospitalMap.get(hospitalName);
+            hospital.totalVisits++;
+            hospital.allVisitDates.push(visit.createdAt);
+
+            // Update latest visit date
+            if (visit.createdAt > hospital.visitDate) {
+                hospital.visitDate = visit.createdAt;
+                hospital.visitStatus = visit.STATUS; // Update status to latest visit
+            }
+
+            // Update first visit date
+            if (visit.createdAt < hospital.firstVisitDate) {
+                hospital.firstVisitDate = visit.createdAt;
+            }
+        });
+
+        // Convert map to array and sort visit dates
+        const uniqueHospitals = Array.from(hospitalMap.values()).map(hospital => ({
+            ...hospital,
+            allVisitDates: hospital.allVisitDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime()) // Sort descending (latest first)
+        }));
+
+        // Get total count for metadata
+        const totalCount = uniqueHospitals.length;
+
+        c.set.status = 200;
+        return {
+            status: c.set.status,
+            success: true,
+            data: {
+                hospitals: uniqueHospitals,
+                metadata: {
+                    totalCount,
+                    salesPersonEmail: decodedEmail,
+                    fetchedAt: new Date().toISOString(),
+                }
+            },
+            message: `Hospitals visited by ${decodedEmail} retrieved successfully. Total records: ${totalCount}`,
+        };
+    } catch (error: any) {
+        console.error("Error fetching hospitals by sales person email:", error);
+        c.set.status = 500;
+        return {
+            status: c.set.status,
+            success: false,
+            message: error.message || "Internal Server Error while fetching hospitals",
+        };
+    }
+});
+
+// API endpoint for getting doctors visited by sales person email
+app.get(`/api/v1/sales/doctors/:salesPersonEmail`, async (c: Context<{ params: { salesPersonEmail: string } }>) => {
+    try {
+        const { salesPersonEmail } = c.params;
+
+        if (!salesPersonEmail) {
+            c.set.status = 400;
+            return {
+                status: 400,
+                success: false,
+                message: 'Sales person email parameter is required'
+            };
+        }
+
+        // Decode the email parameter
+        const decodedEmail = decodeURIComponent(salesPersonEmail);
+
+        // Fetch doctors visited by the specific sales person
+        const visitedDoctorsData = await db.visit_Information.findMany({
+            select: {
+                id: true,
+                HAPLID: true,
+                DOCTOR_NAME: true,
+                HOSPITAL_NAME: true,
+                YOUR_NAME: true,
+                STATUS: true,
+                EMAIL: true,
+                createdAt: true,
+                UserDetails: {
+                    select: {
+                        name: true,
+                        email: true,
+                    }
+                }
+            },
+            where: {
+                EMAIL: decodedEmail,
+                STATUS: {
+                    in: ["COMPLETED", "AD_HOC"]
+                }
+            },
+            orderBy: {
+                createdAt: "desc",
+            }
+        });
+
+        // Group doctors by name and hospital, collect visit information
+        const doctorMap = new Map();
+
+        visitedDoctorsData.forEach(visit => {
+            const doctorKey = `${visit.DOCTOR_NAME}_${visit.HOSPITAL_NAME}`;
+
+            if (!doctorMap.has(doctorKey)) {
+                doctorMap.set(doctorKey, {
+                    id: visit.id,
+                    haplId: visit.HAPLID,
+                    doctorName: visit.DOCTOR_NAME,
+                    hospitalName: visit.HOSPITAL_NAME,
+                    salesPersonName: visit.YOUR_NAME,
+                    salesPersonEmail: visit.EMAIL,
+                    visitStatus: visit.STATUS,
+                    userDetails: visit.UserDetails,
+                    totalVisits: 0,
+                    visitDate: visit.createdAt, // Latest visit date
+                    firstVisitDate: visit.createdAt,
+                    allVisitDates: []
+                });
+            }
+
+            const doctor = doctorMap.get(doctorKey);
+            doctor.totalVisits++;
+            doctor.allVisitDates.push(visit.createdAt);
+
+            // Update latest visit date
+            if (visit.createdAt > doctor.visitDate) {
+                doctor.visitDate = visit.createdAt;
+                doctor.visitStatus = visit.STATUS; // Update status to latest visit
+            }
+
+            // Update first visit date
+            if (visit.createdAt < doctor.firstVisitDate) {
+                doctor.firstVisitDate = visit.createdAt;
+            }
+        });
+
+        // Convert map to array and sort visit dates
+        const uniqueDoctors = Array.from(doctorMap.values()).map(doctor => ({
+            ...doctor,
+            allVisitDates: doctor.allVisitDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime()) // Sort descending (latest first)
+        }));
+
+        // Get total count for metadata
+        const totalCount = uniqueDoctors.length;
+
+        c.set.status = 200;
+        return {
+            status: c.set.status,
+            success: true,
+            data: {
+                doctors: uniqueDoctors,
+                metadata: {
+                    totalCount,
+                    salesPersonEmail: decodedEmail,
+                    fetchedAt: new Date().toISOString(),
+                }
+            },
+            message: `Doctors visited by ${decodedEmail} retrieved successfully. Total records: ${totalCount}`,
+        };
+    } catch (error: any) {
+        console.error("Error fetching doctors by sales person email:", error);
+        c.set.status = 500;
+        return {
+            status: c.set.status,
+            success: false,
+            message: error.message || "Internal Server Error while fetching doctors",
+        };
+    }
+});
+
 // server running
 app.listen(PORT);
 
