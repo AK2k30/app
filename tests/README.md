@@ -5,23 +5,31 @@ This directory contains Cucumber BDD (Behavior Driven Development) tests for the
 - Visit API (`/api/v1/visit/all`, `/api/v1/visit/hospitals`)
 - Doctor API (tested through hospital visit data)
 - Hospital API (tested through visit endpoints)
+- **NEW**: Sales Person Date Range APIs (`/api/v1/sales/visits/:email`, `/api/v1/sales/hospitals/:email`, `/api/v1/sales/doctors/:email`) with date filtering
 
 ## Test Structure
 
 ```
 tests/
-├── features/           # Gherkin feature files
-│   ├── visit.feature   # Visit API test scenarios
-│   ├── doctor.feature  # Doctor API test scenarios
-│   └── hospital.feature # Hospital API test scenarios
-├── step-definitions/   # Step implementations
-│   ├── common.js       # Common steps (auth, requests, etc.)
-│   ├── visit.js        # Visit-specific steps
-│   ├── doctor.js       # Doctor-specific steps
-│   └── hospital.js     # Hospital-specific steps
-└── support/           # Test configuration
-    ├── world.js       # Custom world constructor
-    └── hooks.js       # Before/After hooks
+├── features/                    # Gherkin feature files
+│   ├── visit.feature            # Visit API test scenarios
+│   ├── doctor.feature           # Doctor API test scenarios
+│   ├── hospital.feature         # Hospital API test scenarios
+│   ├── visit-date-range.feature # NEW: Visit date range API scenarios
+│   ├── hospital-date-range.feature # NEW: Hospital date range API scenarios
+│   └── doctor-date-range.feature   # NEW: Doctor date range API scenarios
+├── step-definitions/            # Step implementations
+│   ├── common.cjs               # Common steps (auth, requests, etc.)
+│   ├── visit.cjs                # Visit-specific steps
+│   ├── doctor.cjs               # Doctor-specific steps
+│   ├── hospital.cjs             # Hospital-specific steps
+│   ├── date-range-common.cjs    # NEW: Common date range steps
+│   ├── visit-date-range.cjs     # NEW: Visit date range steps
+│   ├── hospital-date-range.cjs  # NEW: Hospital date range steps
+│   └── doctor-date-range.cjs    # NEW: Doctor date range steps
+└── support/                     # Test configuration
+    ├── world.cjs                # Custom world constructor
+    └── hooks.cjs                # Before/After hooks
 ```
 
 ## Prerequisites
@@ -55,9 +63,18 @@ bun run test:html
 
 ### Run Specific Feature
 ```bash
+# Original API tests
 npx cucumber-js tests/features/visit.feature
 npx cucumber-js tests/features/doctor.feature
 npx cucumber-js tests/features/hospital.feature
+
+# NEW: Date Range API tests
+npx cucumber-js tests/features/visit-date-range.feature
+npx cucumber-js tests/features/hospital-date-range.feature
+npx cucumber-js tests/features/doctor-date-range.feature
+
+# Run all date range tests
+npx cucumber-js tests/features/*-date-range.feature
 ```
 
 ## Test Configuration
@@ -97,6 +114,41 @@ The default base URL is `http://localhost:3003`. You can modify this in the conf
 - ✅ Verify hospital data structure
 - ✅ Test hospital visit tracking
 - ✅ Verify hospital address information
+
+### NEW: Sales Person Date Range API Tests
+
+#### Visit Date Range Tests
+- ✅ Get visits without date filter
+- ✅ Get visits with start date filter
+- ✅ Get visits with end date filter
+- ✅ Get visits with both start and end date filters
+- ✅ Handle invalid date formats
+- ✅ Handle invalid date ranges (start > end)
+- ✅ Support datetime format filtering
+- ✅ Verify response structure with date filtering
+- ✅ Verify visits summary information
+
+#### Hospital Date Range Tests
+- ✅ Get hospitals without date filter
+- ✅ Get hospitals with start date filter
+- ✅ Get hospitals with end date filter
+- ✅ Get hospitals with both start and end date filters
+- ✅ Handle invalid date formats
+- ✅ Handle invalid date ranges
+- ✅ Verify hospital data structure
+- ✅ Verify hospital visit tracking information
+- ✅ Verify date range filtering accuracy
+
+#### Doctor Date Range Tests
+- ✅ Get doctors without date filter
+- ✅ Get doctors with start date filter
+- ✅ Get doctors with end date filter
+- ✅ Get doctors with both start and end date filters
+- ✅ Handle invalid date formats
+- ✅ Handle invalid date ranges
+- ✅ Verify doctor data structure
+- ✅ Verify doctor-hospital relationships
+- ✅ Verify visit date filtering accuracy
 
 ## Reports
 
