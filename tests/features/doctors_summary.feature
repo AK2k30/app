@@ -9,7 +9,7 @@ Feature: Doctors summary API
     And I am authenticated as a valid user
 
   Scenario: Get doctors summary with a date range
-    When I send a GET request to "/api/v1/doctors/summary?start=2025-01-01&end=2100-09-01"
+    When I send a GET request to "/api/v1/doctors/summary?start=2025-01-01&end=2025-09-01"
     Then the response status should be 200
     And the response should have the following structure:
       | field     | type   |
@@ -19,4 +19,5 @@ Feature: Doctors summary API
       | metadata  | object |
     And the response should be successful
     And the metadata should include total counts
+
 
