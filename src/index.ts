@@ -1842,7 +1842,11 @@ app.get(
           createdAtFilter.lte = endDate;
         }
 
-        if (start && end && new Date(start as string) > new Date(end as string)) {
+        if (
+          start &&
+          end &&
+          new Date(start as string) > new Date(end as string)
+        ) {
           c.set.status = 400;
           return {
             status: 400,
@@ -1873,7 +1877,9 @@ app.get(
       const doctorMap = new Map();
 
       sampleData.forEach((sample) => {
-        const monthKey = `${sample.createdAt.getFullYear()}-${sample.createdAt.getMonth() + 1}`;
+        const monthKey = `${sample.createdAt.getFullYear()}-${
+          sample.createdAt.getMonth() + 1
+        }`;
         const doctorKey = `${sample.REF_DOCTOR_NAME}_${monthKey}`;
 
         if (!doctorMap.has(doctorKey)) {
@@ -1922,7 +1928,8 @@ app.get(
       return {
         status: 500,
         success: false,
-        message: error.message || "Internal Server Error while fetching samples",
+        message:
+          error.message || "Internal Server Error while fetching samples",
       };
     }
   }
@@ -2056,127 +2063,123 @@ app.get(
   }
 );
 
-app.get(
-  "/api/v1/doctors/summary",
-  async (c: Context) => {
-    try {
-      const { start, end } = c.query;
+app.get("/api/v1/doctors/summary", async (c: Context) => {
+  try {
+    const { start, end } = c.query;
 
-      // 1️⃣ Date filter
-      let dateFilter: any = {};
-      if (start || end) {
-        dateFilter.createdAt = {};
-        if (start) dateFilter.createdAt.gte = new Date(start as string);
-        if (end) {
-          const endDate = new Date(end as string);
-          if ((end as string).length === 10) {
-            endDate.setHours(23, 59, 59, 999);
-          }
-          dateFilter.createdAt.lte = endDate;
+    // 1️⃣ Date filter
+    let dateFilter: any = {};
+    if (start || end) {
+      dateFilter.createdAt = {};
+      if (start) dateFilter.createdAt.gte = new Date(start as string);
+      if (end) {
+        const endDate = new Date(end as string);
+        if ((end as string).length === 10) {
+          endDate.setHours(23, 59, 59, 999);
         }
+        dateFilter.createdAt.lte = endDate;
       }
+    }
 
-      // 2️⃣ Fetch visits within date range
-      const visits = await db.visit_Information.findMany({
-        where: {
-          STATUS: { in: ["COMPLETED", "AD_HOC"] },
-          ...dateFilter,
-        },
-        select: {
-          DOCTOR_NAME: true,
-          HOSPITAL_NAME: true,
-          YOUR_NAME: true,
-          createdAt: true,
-          STATUS: true,
-        },
-      });
+    // 2️⃣ Fetch visits within date range
+    const visits = await db.visit_Information.findMany({
+      where: {
+        STATUS: { in: ["COMPLETED", "AD_HOC"] },
+        ...dateFilter,
+      },
+      select: {
+        DOCTOR_NAME: true,
+        HOSPITAL_NAME: true,
+        YOUR_NAME: true,
+        createdAt: true,
+        STATUS: true,
+      },
+    });
 
-      if (!visits.length) {
-        return {
-          success: true,
-          message: "No doctor visits found in given date range",
-          data: [],
-          metadata: {
-            totalVisits: 0,
-            totalDoctors: 0,
-            totalSamples: 0,
-            dateRange: { start: start || null, end: end || null },
-          },
-        };
-      }
-
-      // 3️⃣ Get unique doctor names
-      const doctorNames = [...new Set(visits.map((v) => v.DOCTOR_NAME))];
-
-      // 4️⃣ Fetch samples for those doctors in date range
-      const samples = await db.sample_Details.findMany({
-        where: {
-          REF_DOCTOR_NAME: { in: doctorNames },
-          ...dateFilter,
-        },
-        select: {
-          REF_DOCTOR_NAME: true,
-          PRODUCT: true,
-          createdAt: true,
-        },
-      });
-
-      // 5️⃣ Merge visits and samples per doctor
-      const doctorMap: Record<string, any> = {};
-
-      visits.forEach((visit) => {
-        if (!doctorMap[visit.DOCTOR_NAME]) {
-          doctorMap[visit.DOCTOR_NAME] = {
-            doctorName: visit.DOCTOR_NAME,
-            hospitalName: visit.HOSPITAL_NAME,
-            salesperson: visit.YOUR_NAME,
-            visits: [],
-            totalVisits: 0,   // 👈 add counter here
-            totalSamples: 0,
-            samples: [],
-          };
-        }
-        doctorMap[visit.DOCTOR_NAME].visits.push({
-          date: visit.createdAt,
-          status: visit.STATUS,
-        });
-        doctorMap[visit.DOCTOR_NAME].totalVisits++; // 👈 increment per doctor
-      });
-
-      samples.forEach((sample) => {
-        if (doctorMap[sample.REF_DOCTOR_NAME]) {
-          doctorMap[sample.REF_DOCTOR_NAME].samples.push({
-            product: sample.PRODUCT,
-            date: sample.createdAt,
-          });
-          doctorMap[sample.REF_DOCTOR_NAME].totalSamples++;
-        }
-      });
-
-      // 6️⃣ Summary metadata
-      const totalVisits = visits.length;
-      const totalDoctors = Object.keys(doctorMap).length;
-      const totalSamples = samples.length;
-
+    if (!visits.length) {
       return {
         success: true,
-        message: "Doctor summary fetched successfully",
-        data: Object.values(doctorMap),
+        message: "No doctor visits found in given date range",
+        data: [],
         metadata: {
-          totalVisits,
-          totalDoctors,
-          totalSamples,
+          totalVisits: 0,
+          totalDoctors: 0,
+          totalSamples: 0,
           dateRange: { start: start || null, end: end || null },
         },
       };
-    } catch (error: any) {
-      console.error("Error fetching doctor summary:", error);
-      c.set.status = 500;
-      return { success: false, message: "Internal Server Error" };
     }
-  }
-);
 
+    // 3️⃣ Get unique doctor names
+    const doctorNames = [...new Set(visits.map((v) => v.DOCTOR_NAME))];
+
+    // 4️⃣ Fetch samples for those doctors in date range
+    const samples = await db.sample_Details.findMany({
+      where: {
+        REF_DOCTOR_NAME: { in: doctorNames },
+        ...dateFilter,
+      },
+      select: {
+        REF_DOCTOR_NAME: true,
+        PRODUCT: true,
+        createdAt: true,
+      },
+    });
+
+    // 5️⃣ Merge visits and samples per doctor
+    const doctorMap: Record<string, any> = {};
+
+    visits.forEach((visit) => {
+      if (!doctorMap[visit.DOCTOR_NAME]) {
+        doctorMap[visit.DOCTOR_NAME] = {
+          doctorName: visit.DOCTOR_NAME,
+          hospitalName: visit.HOSPITAL_NAME,
+          salesperson: visit.YOUR_NAME,
+          visits: [],
+          totalVisits: 0,
+          totalSamples: 0,
+          samples: [],
+        };
+      }
+      doctorMap[visit.DOCTOR_NAME].visits.push({
+        date: visit.createdAt,
+        status: visit.STATUS,
+      });
+      doctorMap[visit.DOCTOR_NAME].totalVisits++;
+    });
+
+    samples.forEach((sample) => {
+      if (doctorMap[sample.REF_DOCTOR_NAME]) {
+        doctorMap[sample.REF_DOCTOR_NAME].samples.push({
+          product: sample.PRODUCT,
+          date: sample.createdAt,
+        });
+        doctorMap[sample.REF_DOCTOR_NAME].totalSamples++;
+      }
+    });
+
+    // 6️⃣ Summary metadata
+    const totalVisits = visits.length;
+    const totalDoctors = Object.keys(doctorMap).length;
+    const totalSamples = samples.length;
+
+    return {
+      success: true,
+      message: "Doctor summary fetched successfully",
+      data: Object.values(doctorMap),
+      metadata: {
+        totalVisits,
+        totalDoctors,
+        totalSamples,
+        dateRange: { start: start || null, end: end || null },
+      },
+    };
+  } catch (error: any) {
+    console.error("Error fetching doctor summary:", error);
+    c.set.status = 500;
+    return { success: false, message: "Internal Server Error" };
+  }
+});
 
 // server running
 app.listen(PORT);
