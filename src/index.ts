@@ -2199,7 +2199,7 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
       dateFilter.createdAt = {};
       if (start) dateFilter.createdAt.gte = new Date(start as string);
 
-      if (end) {
+      if (end) { 
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
           endDate.setHours(23, 59, 59, 999); // include full day
@@ -2366,6 +2366,190 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
   }
 });
 
+app.get("/api/v1/organisation/products-summary", async (c: Context) => {
+  try {
+    const { organisation, period, start, end } = c.query;
+
+    // 1️⃣ Validate period
+    if (!["week", "month", "year"].includes(period as string)) {
+      return {
+        success: false,
+        message: "Invalid period. Use 'week', 'month', or 'year'.",
+      };
+    }
+
+    // 2️⃣ Date filter
+    const dateFilter: any = {};
+    if (start || end) {
+      dateFilter.createdAt = {};
+      if (start) dateFilter.createdAt.gte = new Date(start as string);
+
+      if (end) {
+        const endDate = new Date(end as string);
+        if ((end as string).length === 10) {
+          endDate.setHours(23, 59, 59, 999); // include full day
+        }
+        dateFilter.createdAt.lte = endDate;
+      }
+    }
+
+    // 3️⃣ Where clause
+    const whereClause: any = { ...dateFilter };
+    if (organisation) {
+      whereClause.ORGANISATION_NAME = decodeURIComponent(organisation as string);
+    }
+
+    // 4️⃣ Fetch samples
+    const samples = await db.sample_Details.findMany({
+      where: whereClause,
+      select: { PRODUCT: true, ORGANISATION_NAME: true, createdAt: true },
+    });
+
+    if (!samples.length) {
+      return {
+        success: true,
+        message: "No samples found for given filters",
+        data: [],
+        metadata: {
+          organisation: organisation || "ALL",
+          totalSamples: 0,
+          totalPeriods: 0,
+          period,
+          dateRange: { start: start || null, end: end || null },
+        },
+      };
+    }
+
+    // 5️⃣ Helper: format key by period
+    const formatKey = (date: Date) => {
+      const d = new Date(date);
+      if (period === "year") return d.getFullYear().toString();
+      if (period === "month")
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (period === "week") {
+        const firstDay = new Date(d.getFullYear(), 0, 1);
+        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
+        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
+        return `${d.getFullYear()}-W${week}`;
+      }
+    };
+
+    // 6️⃣ Build summary map
+    const summaryMap: Record<
+      string,
+      {
+        period: string;
+        organisation: string;
+        products: Record<string, number>;
+        totalSamples: number;
+        changes: { total: number; products: Record<string, number> };
+      }
+    > = {};
+
+    for (const sample of samples) {
+      const key = formatKey(sample.createdAt);
+      if (!key) continue;
+
+      const org = organisation || sample.ORGANISATION_NAME || "unknown";
+      const mapKey = `${org}_${key}`;
+
+      if (!summaryMap[mapKey]) {
+        summaryMap[mapKey] = {
+          period: key,
+          organisation: org,
+          products: {},
+          totalSamples: 0,
+          changes: { total: 0, products: {} },
+        };
+      }
+
+      const product = sample.PRODUCT || "unknown";
+      summaryMap[mapKey].products[product] =
+        (summaryMap[mapKey].products[product] || 0) + 1;
+      summaryMap[mapKey].totalSamples++;
+    }
+
+    // 7️⃣ Convert to array & sort
+    const data = Object.values(summaryMap).sort((a, b) =>
+      a.period.localeCompare(b.period)
+    );
+
+    // 8️⃣ Format response with trends
+    const formattedData = data.map((current, i) => {
+      // previous record for same organisation
+      const previous = data
+        .slice(0, i)
+        .reverse()
+        .find((d) => d.organisation === current.organisation);
+
+      // 🔹 Summary section
+      let totalChange = `No previous ${period} data`;
+      if (previous) {
+        const diff = current.totalSamples - previous.totalSamples;
+        const pct = previous.totalSamples
+          ? Math.round((diff / previous.totalSamples) * 100)
+          : 100;
+
+        totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
+          pct
+        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+      }
+
+      // 🔹 Products section
+      const productsArr = Array.from(
+        new Set([
+          ...(previous ? Object.keys(previous.products) : []),
+          ...Object.keys(current.products),
+        ])
+      ).map((prod) => {
+        const prevCount = previous?.products[prod] || 0;
+        const currCount = current.products[prod] || 0;
+
+        let changeMsg = "0% (no change)";
+        if (previous && prevCount > 0) {
+          const diff = currCount - prevCount;
+          const pct = Math.round((diff / prevCount) * 100);
+          changeMsg = `${diff >= 0 ? "+" : "-"}${Math.abs(pct)}%`;
+        } else if (previous && prevCount === 0 && currCount > 0) {
+          changeMsg = "+100% (new orders)";
+        } else if (!previous) {
+          changeMsg = "No previous data";
+        }
+
+        const trend = previous
+          ? `${previous.period} = ${prevCount} → ${current.period} = ${currCount}`
+          : `${current.period} = ${currCount} (first entry)`;
+
+        return { name: prod, trend, change: changeMsg };
+      });
+
+      return {
+        period: current.period,
+        organisation: current.organisation,
+        summary: { totalSamples: current.totalSamples, totalChange },
+        products: productsArr,
+      };
+    });
+
+    // 9️⃣ Final response
+    return {
+      success: true,
+      message: "Organisation product summary fetched successfully",
+      data: formattedData,
+      metadata: {
+        organisation: organisation || "ALL",
+        totalSamples: samples.length,
+        totalPeriods: formattedData.length,
+        period,
+        dateRange: { start: start || null, end: end || null },
+      },
+    };
+  } catch (error: any) {
+    console.error("Error fetching organisation summary:", error);
+    c.set.status = 500;
+    return { success: false, message: "Internal Server Error" };
+  }
+});
 
 // server running
 app.listen(PORT);
