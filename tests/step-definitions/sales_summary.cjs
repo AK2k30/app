@@ -48,6 +48,3 @@ Then('the metadata should include total counts', function () {
   });
   assert(m.dateRange && typeof m.dateRange === 'object', 'Metadata should include dateRange');
 });
-
-
-

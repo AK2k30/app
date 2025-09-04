@@ -18,5 +18,3 @@ Feature: Sales summary API
       | metadata  | object |
     And the response should be successful
     And the metadata should include total counts
-
-

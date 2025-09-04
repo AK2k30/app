@@ -26,4 +26,3 @@ Then('each doctor summary item should have the following fields:', function (dat
     });
   });
 });
-
