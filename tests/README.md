@@ -27,9 +27,16 @@ tests/
 │   ├── visit-date-range.cjs     # NEW: Visit date range steps
 │   ├── hospital-date-range.cjs  # NEW: Hospital date range steps
 │   └── doctor-date-range.cjs    # NEW: Doctor date range steps
+│   └── products_summary.cjs     # NEW: Products summary shared steps
 └── support/                     # Test configuration
     ├── world.cjs                # Custom world constructor
     └── hooks.cjs                # Before/After hooks
+    
+# New products summary feature files
+features/
+  salesperson_products_summary.feature
+  organisation_products_summary.feature
+  doctor_products_summary.feature
 ```
 
 ## Prerequisites
