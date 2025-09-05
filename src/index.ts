@@ -11,6 +11,9 @@ import {
 } from "./utils/helper";
 import { applyRoleFilter } from "./utils/roleFilter";
 import { jwt } from "./utils/jwt";
+import dayjs from "dayjs";
+import isoWeek from "dayjs/plugin/isoWeek";
+dayjs.extend(isoWeek);
 
 const db = new PrismaClient();
 
@@ -2199,7 +2202,7 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
       dateFilter.createdAt = {};
       if (start) dateFilter.createdAt.gte = new Date(start as string);
 
-      if (end) { 
+      if (end) {
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
           endDate.setHours(23, 59, 59, 999); // include full day
@@ -2235,18 +2238,13 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
       };
     }
 
-    // 5️⃣ Helper: format key by period
+    // 5️⃣ Helper: format key by period (using Day.js)
     const formatKey = (date: Date) => {
-      const d = new Date(date);
-      if (period === "year") return d.getFullYear().toString();
-      if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (period === "week") {
-        const firstDay = new Date(d.getFullYear(), 0, 1);
-        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
-        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
-        return `${d.getFullYear()}-W${week}`;
-      }
+      const d = dayjs(date);
+
+      if (period === "year") return d.format("YYYY"); // e.g. "2025"
+      if (period === "month") return d.format("YYYY-MM"); // e.g. "2025-09"
+      if (period === "week") return `${d.format("YYYY")}-W${d.isoWeek()}`; // e.g. "2025-W36"
     };
 
     // 6️⃣ Build summary map
@@ -2291,13 +2289,11 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
 
     // 8️⃣ Format response with trends
     const formattedData = data.map((current, i) => {
-      // previous record for same salesperson
       const previous = data
         .slice(0, i)
         .reverse()
         .find((d) => d.salesperson === current.salesperson);
 
-      // 🔹 Summary section
       let totalChange = `No previous ${period} data`;
       if (previous) {
         const diff = current.totalSamples - previous.totalSamples;
@@ -2307,10 +2303,11 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
 
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
-      // 🔹 Products section
       const productsArr = Array.from(
         new Set([
           ...(previous ? Object.keys(previous.products) : []),
@@ -2387,7 +2384,7 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       if (end) {
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
-          endDate.setHours(23, 59, 59, 999); // include full day
+          endDate.setHours(23, 59, 59, 999);
         }
         dateFilter.createdAt.lte = endDate;
       }
@@ -2396,7 +2393,9 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
     // 3️⃣ Where clause
     const whereClause: any = { ...dateFilter };
     if (organisation) {
-      whereClause.ORGANISATION_NAME = decodeURIComponent(organisation as string);
+      whereClause.ORGANISATION_NAME = decodeURIComponent(
+        organisation as string
+      );
     }
 
     // 4️⃣ Fetch samples
@@ -2420,18 +2419,13 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       };
     }
 
-    // 5️⃣ Helper: format key by period
+    // 5️⃣ Helper: format key by period (ISO weeks now)
     const formatKey = (date: Date) => {
-      const d = new Date(date);
-      if (period === "year") return d.getFullYear().toString();
-      if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (period === "week") {
-        const firstDay = new Date(d.getFullYear(), 0, 1);
-        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
-        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
-        return `${d.getFullYear()}-W${week}`;
-      }
+      const d = dayjs(date);
+
+      if (period === "year") return d.format("YYYY"); // e.g. "2025"
+      if (period === "month") return d.format("YYYY-MM"); // e.g. "2025-09"
+      if (period === "week") return `${d.format("YYYY")}-W${d.isoWeek()}`; // e.g. "2025-W36"
     };
 
     // 6️⃣ Build summary map
@@ -2476,26 +2470,24 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
 
     // 8️⃣ Format response with trends
     const formattedData = data.map((current, i) => {
-      // previous record for same organisation
       const previous = data
         .slice(0, i)
         .reverse()
         .find((d) => d.organisation === current.organisation);
 
-      // 🔹 Summary section
       let totalChange = `No previous ${period} data`;
       if (previous) {
         const diff = current.totalSamples - previous.totalSamples;
         const pct = previous.totalSamples
           ? Math.round((diff / previous.totalSamples) * 100)
           : 100;
-
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
-      // 🔹 Products section
       const productsArr = Array.from(
         new Set([
           ...(previous ? Object.keys(previous.products) : []),
@@ -2531,7 +2523,6 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       };
     });
 
-    // 9️⃣ Final response
     return {
       success: true,
       message: "Organisation product summary fetched successfully",
@@ -2607,16 +2598,11 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
 
     // 5️⃣ Helper: format key by period
     const formatKey = (date: Date) => {
-      const d = new Date(date);
-      if (period === "year") return d.getFullYear().toString();
-      if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (period === "week") {
-        const firstDay = new Date(d.getFullYear(), 0, 1);
-        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
-        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
-        return `${d.getFullYear()}-W${week}`;
-      }
+      const d = dayjs(date);
+
+      if (period === "year") return d.format("YYYY"); // e.g. "2025"
+      if (period === "month") return d.format("YYYY-MM"); // e.g. "2025-09"
+      if (period === "week") return `${d.format("YYYY")}-W${d.isoWeek()}`; // e.g. "2025-W36"
     };
 
     // 6️⃣ Build summary map
@@ -2677,12 +2663,17 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
 
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
       // 🔹 Products section
       const productsArr = Array.from(
-        new Set([...(previous ? Object.keys(previous.products) : []), ...Object.keys(current.products)])
+        new Set([
+          ...(previous ? Object.keys(previous.products) : []),
+          ...Object.keys(current.products),
+        ])
       ).map((prod) => {
         const prevCount = previous?.products[prod] || 0;
         const currCount = current.products[prod] || 0;
