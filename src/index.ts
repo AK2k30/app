@@ -11,7 +11,6 @@ import {
 } from "./utils/helper";
 import { applyRoleFilter } from "./utils/roleFilter";
 import { jwt } from "./utils/jwt";
-import dayjs from "dayjs";
 
 const db = new PrismaClient();
 
@@ -2194,32 +2193,51 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
       };
     }
 
-    // 2️⃣ Date filter
-    const dateFilter: any = {};
+    // 2️⃣ Date filter - MongoDB aggregation format
+    const matchStage: any = {};
     if (start || end) {
-      dateFilter.createdAt = {};
-      if (start) dateFilter.createdAt.gte = new Date(start as string);
+      matchStage.createdAt = {};
+      if (start) matchStage.createdAt.$gte = new Date(start as string);
 
-      if (end) { 
+      if (end) {
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
           endDate.setHours(23, 59, 59, 999); // include full day
         }
-        dateFilter.createdAt.lte = endDate;
+        matchStage.createdAt.$lte = endDate;
       }
     }
 
-    // 3️⃣ Where clause
-    const whereClause: any = { ...dateFilter };
+    // 3️⃣ Salesperson filter
     if (salesperson) {
-      whereClause.SALESSPOC_ID = decodeURIComponent(salesperson as string);
+      matchStage.SALESSPOC_ID = decodeURIComponent(salesperson as string);
     }
 
-    // 4️⃣ Fetch samples
-    const samples = await db.sample_Details.findMany({
-      where: whereClause,
-      select: { PRODUCT: true, SALESSPOC_ID: true, createdAt: true },
-    });
+    // 4️⃣ MongoDB Aggregation Pipeline
+    const pipeline = [
+      // Match stage - equivalent to where clause
+      { $match: matchStage },
+      
+      { 
+        $project: { 
+          PRODUCT: 1, 
+          SALESSPOC_ID: 1, 
+          createdAt: 1 
+        } 
+      }
+    ];
+
+    // Execute aggregation
+    const aggregated = await db.$runCommandRaw({
+      aggregate: "sample_Details",
+      pipeline: pipeline,
+      cursor: {},
+    }) as {
+      cursor?: { firstBatch?: any[] };
+    };
+
+    // Extract samples from aggregation result
+    const samples = aggregated?.cursor?.firstBatch ?? [];
 
     if (!samples.length) {
       return {
@@ -2236,18 +2254,13 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
       };
     }
 
-    // 5️⃣ Helper: format key by period
+    // 5️⃣ Helper: format key by period (using Day.js)
     const formatKey = (date: Date) => {
-      const d = new Date(date);
-      if (period === "year") return d.getFullYear().toString();
-      if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (period === "week") {
-        const firstDay = new Date(d.getFullYear(), 0, 1);
-        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
-        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
-        return `${d.getFullYear()}-W${week}`;
-      }
+      const d = dayjs(date);
+
+      if (period === "year") return d.format("YYYY"); // e.g. "2025"
+      if (period === "month") return d.format("YYYY-MM"); // e.g. "2025-09"
+      if (period === "week") return `${d.format("YYYY")}-W${d.isoWeek()}`; // e.g. "2025-W36"
     };
 
     // 6️⃣ Build summary map
@@ -2292,13 +2305,11 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
 
     // 8️⃣ Format response with trends
     const formattedData = data.map((current, i) => {
-      // previous record for same salesperson
       const previous = data
         .slice(0, i)
         .reverse()
         .find((d) => d.salesperson === current.salesperson);
 
-      // 🔹 Summary section
       let totalChange = `No previous ${period} data`;
       if (previous) {
         const diff = current.totalSamples - previous.totalSamples;
@@ -2308,10 +2319,11 @@ app.get("/api/v1/salesperson/products-summary", async (c: Context) => {
 
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
-      // 🔹 Products section
       const productsArr = Array.from(
         new Set([
           ...(previous ? Object.keys(previous.products) : []),
@@ -2379,32 +2391,54 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       };
     }
 
-    // 2️⃣ Date filter
-    const dateFilter: any = {};
+    // 2️⃣ Date filter - MongoDB aggregation format
+    const matchStage: any = {};
     if (start || end) {
-      dateFilter.createdAt = {};
-      if (start) dateFilter.createdAt.gte = new Date(start as string);
+      matchStage.createdAt = {};
+      if (start) matchStage.createdAt.$gte = new Date(start as string);
 
       if (end) {
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
-          endDate.setHours(23, 59, 59, 999); // include full day
+          endDate.setHours(23, 59, 59, 999);
         }
-        dateFilter.createdAt.lte = endDate;
+        matchStage.createdAt.$lte = endDate;
       }
     }
 
-    // 3️⃣ Where clause
-    const whereClause: any = { ...dateFilter };
+    // 3️⃣ Organisation filter
     if (organisation) {
-      whereClause.ORGANISATION_NAME = decodeURIComponent(organisation as string);
+      matchStage.ORGANISATION_NAME = decodeURIComponent(
+        organisation as string
+      );
     }
 
-    // 4️⃣ Fetch samples
-    const samples = await db.sample_Details.findMany({
-      where: whereClause,
-      select: { PRODUCT: true, ORGANISATION_NAME: true, createdAt: true },
-    });
+    // 4️⃣ MongoDB Aggregation Pipeline
+    const pipeline = [
+      // Match stage - equivalent to where clause
+      { $match: matchStage },
+      
+      // Project only needed fields for better performance
+      { 
+        $project: { 
+          PRODUCT: 1, 
+          ORGANISATION_NAME: 1, 
+          createdAt: 1 
+        } 
+      }
+    ];
+
+    // Execute aggregation
+    const aggregated = await db.$runCommandRaw({
+      aggregate: "sample_Details",
+      pipeline: pipeline,
+      cursor: {},
+    }) as {
+      cursor?: { firstBatch?: any[] };
+    };
+
+    // Extract samples from aggregation result
+    const samples = aggregated?.cursor?.firstBatch ?? [];
 
     if (!samples.length) {
       return {
@@ -2421,18 +2455,13 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       };
     }
 
-    // 5️⃣ Helper: format key by period
+    // 5️⃣ Helper: format key by period (ISO weeks now)
     const formatKey = (date: Date) => {
-      const d = new Date(date);
-      if (period === "year") return d.getFullYear().toString();
-      if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      if (period === "week") {
-        const firstDay = new Date(d.getFullYear(), 0, 1);
-        const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
-        const week = Math.ceil((days + firstDay.getDay() + 1) / 7);
-        return `${d.getFullYear()}-W${week}`;
-      }
+      const d = dayjs(date);
+
+      if (period === "year") return d.format("YYYY"); // e.g. "2025"
+      if (period === "month") return d.format("YYYY-MM"); // e.g. "2025-09"
+      if (period === "week") return `${d.format("YYYY")}-W${d.isoWeek()}`; // e.g. "2025-W36"
     };
 
     // 6️⃣ Build summary map
@@ -2477,26 +2506,24 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
 
     // 8️⃣ Format response with trends
     const formattedData = data.map((current, i) => {
-      // previous record for same organisation
       const previous = data
         .slice(0, i)
         .reverse()
         .find((d) => d.organisation === current.organisation);
 
-      // 🔹 Summary section
       let totalChange = `No previous ${period} data`;
       if (previous) {
         const diff = current.totalSamples - previous.totalSamples;
         const pct = previous.totalSamples
           ? Math.round((diff / previous.totalSamples) * 100)
           : 100;
-
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
-      // 🔹 Products section
       const productsArr = Array.from(
         new Set([
           ...(previous ? Object.keys(previous.products) : []),
@@ -2532,7 +2559,6 @@ app.get("/api/v1/organisation/products-summary", async (c: Context) => {
       };
     });
 
-    // 9️⃣ Final response
     return {
       success: true,
       message: "Organisation product summary fetched successfully",
@@ -2564,32 +2590,52 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
       };
     }
 
-    // 2️⃣ Date filter
-    const dateFilter: any = {};
+    // 2️⃣ Date filter - MongoDB aggregation format
+    const matchStage: any = {};
     if (start || end) {
-      dateFilter.createdAt = {};
-      if (start) dateFilter.createdAt.gte = new Date(start as string);
+      matchStage.createdAt = {};
+      if (start) matchStage.createdAt.$gte = new Date(start as string);
 
       if (end) {
         const endDate = new Date(end as string);
         if ((end as string).length === 10) {
           endDate.setHours(23, 59, 59, 999); // include full day
         }
-        dateFilter.createdAt.lte = endDate;
+        matchStage.createdAt.$lte = endDate;
       }
     }
 
-    // 3️⃣ Where clause
-    const whereClause: any = { ...dateFilter };
+    // 3️⃣ Doctor filter
     if (doctor) {
-      whereClause.REF_DOCTOR_NAME = decodeURIComponent(doctor as string);
+      matchStage.REF_DOCTOR_NAME = decodeURIComponent(doctor as string);
     }
 
-    // 4️⃣ Fetch samples
-    const samples = await db.sample_Details.findMany({
-      where: whereClause,
-      select: { PRODUCT: true, REF_DOCTOR_NAME: true, createdAt: true },
-    });
+    // 4️⃣ MongoDB Aggregation Pipeline
+    const pipeline = [
+      // Match stage - equivalent to where clause
+      { $match: matchStage },
+      
+      // Project only needed fields for better performance
+      { 
+        $project: { 
+          PRODUCT: 1, 
+          REF_DOCTOR_NAME: 1, 
+          createdAt: 1 
+        } 
+      }
+    ];
+
+    // Execute aggregation
+    const aggregated = await db.$runCommandRaw({
+      aggregate: "sample_Details",
+      pipeline: pipeline,
+      cursor: {},
+    }) as {
+      cursor?: { firstBatch?: any[] };
+    };
+
+    // Extract samples from aggregation result
+    const samples = aggregated?.cursor?.firstBatch ?? [];
 
     if (!samples.length) {
       return {
@@ -2611,7 +2657,10 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
       const d = new Date(date);
       if (period === "year") return d.getFullYear().toString();
       if (period === "month")
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}`;
       if (period === "week") {
         const firstDay = new Date(d.getFullYear(), 0, 1);
         const days = Math.floor((d.getTime() - firstDay.getTime()) / 86400000);
@@ -2678,12 +2727,17 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
 
         totalChange = `${diff >= 0 ? "+" : "-"}${Math.abs(
           pct
-        )}% compared to previous ${period} (${previous.totalSamples} → ${current.totalSamples})`;
+        )}% compared to previous ${period} (${previous.totalSamples} → ${
+          current.totalSamples
+        })`;
       }
 
       // 🔹 Products section
       const productsArr = Array.from(
-        new Set([...(previous ? Object.keys(previous.products) : []), ...Object.keys(current.products)])
+        new Set([
+          ...(previous ? Object.keys(previous.products) : []),
+          ...Object.keys(current.products),
+        ])
       ).map((prod) => {
         const prevCount = previous?.products[prod] || 0;
         const currCount = current.products[prod] || 0;
