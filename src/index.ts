@@ -11,6 +11,7 @@ import {
 } from "./utils/helper";
 import { applyRoleFilter } from "./utils/roleFilter";
 import { jwt } from "./utils/jwt";
+import dayjs from "dayjs";
 
 const db = new PrismaClient();
 
@@ -2732,6 +2733,514 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
     return { success: false, message: "Internal Server Error" };
   }
 });
+
+app.get(
+  "/api/v1/sales/summarys/:salesPersonEmail?",
+  async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
+    try {
+      const { salesPersonEmail } = c.params;
+      const { period, start, end } = c.query;
+
+      if (!["week", "month", "year"].includes(period as string)) {
+        c.set.status = 400;
+        return { success: false, message: "Invalid period. Use week, month, or year" };
+      }
+
+      const decodedEmail = salesPersonEmail ? decodeURIComponent(salesPersonEmail) : null;
+
+      const now = dayjs();
+      const startDate = dayjs(start || now);
+      const endDate = dayjs(end || now);
+
+      // 🟢 Get all salesperson emails if not provided
+      let salespersonEmails: string[] = [];
+      if (decodedEmail) {
+        salespersonEmails = [decodedEmail];
+      } else {
+        salespersonEmails = await db.visit_Information.findMany({
+          distinct: ["EMAIL"],
+          where: { STATUS: { in: ["COMPLETED", "AD_HOC"] } },
+          select: { EMAIL: true },
+        }).then((res) => res.map((r) => r.EMAIL));
+      }
+
+      const results: any[] = [];
+
+      for (const email of salespersonEmails) {
+        // loop period by month/week/year
+        let cursor = startDate.clone();
+
+        while (cursor.isBefore(endDate) || cursor.isSame(endDate, period as dayjs.OpUnitType)) {
+          let currentStart, currentEnd, prevStart, prevEnd;
+
+          if (period === "week") {
+            currentStart = cursor.startOf("week");
+            currentEnd = cursor.endOf("week");
+            prevStart = currentStart.subtract(1, "week");
+            prevEnd = currentEnd.subtract(1, "week");
+          } else if (period === "month") {
+            currentStart = cursor.startOf("month");
+            currentEnd = cursor.endOf("month");
+            prevStart = currentStart.subtract(1, "month");
+            prevEnd = currentEnd.subtract(1, "month");
+          } else {
+            currentStart = cursor.startOf("year");
+            currentEnd = cursor.endOf("year");
+            prevStart = currentStart.subtract(1, "year");
+            prevEnd = currentEnd.subtract(1, "year");
+          }
+
+          // 🔹 Visits aggregation (filtered at DB level)
+          const visitsAgg = await db.visit_Information.aggregateRaw({
+            pipeline: [
+              { $match: { EMAIL: email, STATUS: { $in: ["COMPLETED", "AD_HOC"] } } },
+              {
+                $group: {
+                  _id: null,
+                  previous: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: prevStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: prevEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  current: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: currentStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: currentEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+              {
+                $addFields: {
+                  percentage: {
+                    $cond: [
+                      { $eq: ["$previous", 0] },
+                      0,
+                      {
+                        $round: [
+                          {
+                            $multiply: [
+                              { $divide: [{ $subtract: ["$current", "$previous"] }, "$previous"] },
+                              100,
+                            ],
+                          },
+                          2,
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+              // 🚀 Remove rows where both previous and current are 0
+              { $match: { $or: [{ previous: { $gt: 0 } }, { current: { $gt: 0 } }] } },
+            ],
+          });
+
+          const visits = visitsAgg.length > 0 ? (visitsAgg[0] as any) : null;
+
+          // 🔹 Samples aggregation (filtered at DB level)
+          const doctorNames = await db.visit_Information.findMany({
+            where: { EMAIL: email, STATUS: { in: ["COMPLETED", "AD_HOC"] } },
+            select: { DOCTOR_NAME: true },
+          }).then((docs) => docs.map((d) => d.DOCTOR_NAME));
+
+          const samplesAgg = await db.sample_Details.aggregateRaw({
+            pipeline: [
+              { $match: { REF_DOCTOR_NAME: { $in: doctorNames } } },
+              {
+                $group: {
+                  _id: null,
+                  previous: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: prevStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: prevEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  current: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: currentStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: currentEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+              {
+                $addFields: {
+                  percentage: {
+                    $cond: [
+                      { $eq: ["$previous", 0] },
+                      0,
+                      {
+                        $round: [
+                          {
+                            $multiply: [
+                              { $divide: [{ $subtract: ["$current", "$previous"] }, "$previous"] },
+                              100,
+                            ],
+                          },
+                          2,
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+              // 🚀 Remove rows where both previous and current are 0
+              { $match: { $or: [{ previous: { $gt: 0 } }, { current: { $gt: 0 } }] } },
+            ],
+          });
+
+          const samples = samplesAgg.length > 0 ? (samplesAgg[0] as any) : null;
+
+          // 🚀 Only push into results if either visits or samples exist
+          if (visits || samples) {
+            results.push({
+              salesperson: email,
+              visits: visits
+                ? {
+                    [period]:
+                      period === "month"
+                        ? currentStart.format("MM")
+                        : currentStart.format("YYYY-MM-DD"),
+                    previous: Number(visits.previous || 0),
+                    current: Number(visits.current || 0),
+                    percentageChange: Number(visits.percentage || 0),
+                    trend:
+                      Number(visits.percentage) > 0
+                        ? "increase"
+                        : Number(visits.percentage) < 0
+                        ? "decrease"
+                        : "no change",
+                  }
+                : null,
+              samples: samples
+                ? {
+                    [period]:
+                      period === "month"
+                        ? currentStart.format("MM")
+                        : currentStart.format("YYYY-MM-DD"),
+                    previous: Number(samples.previous || 0),
+                    current: Number(samples.current || 0),
+                    percentageChange: Number(samples.percentage || 0),
+                    trend:
+                      Number(samples.percentage) > 0
+                        ? "increase"
+                        : Number(samples.percentage) < 0
+                        ? "decrease"
+                        : "no change",
+                  }
+                : null,
+            });
+          }
+
+          // Move cursor to next period
+          cursor = cursor.add(1, period as dayjs.OpUnitType);
+        }
+      }
+
+      // 🔹 Totals within given daterange
+      const totalVisits = await db.visit_Information.count({
+        where: {
+          STATUS: { in: ["COMPLETED", "AD_HOC"] },
+          ...(decodedEmail ? { EMAIL: decodedEmail } : {}),
+          createdAt: {
+            gte: startDate.toDate(),
+            lte: endDate.toDate(),
+          },
+        },
+      });
+
+      const totalSamples = await db.sample_Details.count({
+        where: {
+          createdAt: {
+            gte: startDate.toDate(),
+            lte: endDate.toDate(),
+          },
+          ...(decodedEmail
+            ? {
+                REF_DOCTOR_NAME: {
+                  in: await db.visit_Information.findMany({
+                    where: {
+                      STATUS: { in: ["COMPLETED", "AD_HOC"] },
+                      EMAIL: decodedEmail,
+                    },
+                    select: { DOCTOR_NAME: true },
+                  }).then((docs) => docs.map((d) => d.DOCTOR_NAME)),
+                },
+              }
+            : {}),
+        },
+      });
+
+      return {
+        success: true,
+        data: results,
+        metadata: {
+          period,
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          totalVisits,
+          totalSamples,
+        },
+      };
+    } catch (error: any) {
+      console.error("Error fetching sales summary:", error);
+      c.set.status = 500;
+      return { success: false, message: "Internal Server Error" };
+    }
+  }
+);
+
+app.get(
+  "/api/v1/products/summary/:salesPersonEmail",
+  async (c: Context<{ params: { salesPersonEmail: string } }>) => {
+    try {
+      const { salesPersonEmail } = c.params;
+      const { period, start, end } = c.query;
+
+      if (!salesPersonEmail) {
+        c.set.status = 400;
+        return { success: false, message: "Sales person email is required" };
+      }
+
+      if (!["week", "month", "year"].includes(period as string)) {
+        c.set.status = 400;
+        return { success: false, message: "Invalid period. Use week, month, or year" };
+      }
+
+      const decodedEmail = decodeURIComponent(salesPersonEmail);
+      
+      const now = dayjs();
+      const startDate = dayjs(start || now);
+      const endDate = dayjs(end || now);
+
+      let monthlyData: any[] = [];
+      let overallTotalSamples = 0;
+
+      // Loop through periods
+      let cursor = startDate.clone();
+
+      while (cursor.isBefore(endDate) || cursor.isSame(endDate, period as dayjs.OpUnitType)) {
+        let currentStart, currentEnd, prevStart, prevEnd;
+
+        if (period === "week") {
+          currentStart = cursor.startOf("week");
+          currentEnd = cursor.endOf("week");
+          prevStart = currentStart.subtract(1, "week");
+          prevEnd = currentEnd.subtract(1, "week");
+        } else if (period === "month") {
+          currentStart = cursor.startOf("month");
+          currentEnd = cursor.endOf("month");
+          prevStart = currentStart.subtract(1, "month");
+          prevEnd = currentEnd.subtract(1, "month");
+        } else {
+          currentStart = cursor.startOf("year");
+          currentEnd = cursor.endOf("year");
+          prevStart = currentStart.subtract(1, "year");
+          prevEnd = currentEnd.subtract(1, "year");
+        }
+
+        // 🔹 Get doctor names visited by this salesperson
+        const doctorNames = await db.visit_Information.findMany({
+          where: { EMAIL: decodedEmail, STATUS: { in: ["COMPLETED", "AD_HOC"] } },
+          select: { DOCTOR_NAME: true },
+        }).then((docs) => docs.map((d) => d.DOCTOR_NAME));
+
+        if (doctorNames.length > 0) {
+          // 🔹 Product-wise samples aggregation using MongoDB pipeline
+          const productSamplesAgg = await db.sample_Details.aggregateRaw({
+            pipeline: [
+              { $match: { REF_DOCTOR_NAME: { $in: doctorNames } } },
+              {
+                $group: {
+                  _id: "$PRODUCT", // Group by product name
+                  previous: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: prevStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: prevEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  current: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: currentStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: currentEnd.toDate() }] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+              {
+                $addFields: {
+                  totalSamples: { $add: ["$previous", "$current"] },
+                  percentageChange: {
+                    $cond: [
+                      { $eq: ["$previous", 0] },
+                      {
+                        $cond: [
+                          { $gt: ["$current", 0] },
+                          100,
+                          0
+                        ]
+                      },
+                      {
+                        $round: [
+                          {
+                            $multiply: [
+                              { $divide: [{ $subtract: ["$current", "$previous"] }, "$previous"] },
+                              100,
+                            ],
+                          },
+                          2,
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+              // Only include products that have samples (previous > 0 OR current > 0)
+              {
+                $match: {
+                  $or: [
+                    { previous: { $gt: 0 } },
+                    { current: { $gt: 0 } }
+                  ]
+                }
+              }
+            ],
+          });
+
+          // 🔹 Calculate total samples for CURRENT period only
+          const totalSamplesAgg = await db.sample_Details.aggregateRaw({
+            pipeline: [
+              { $match: { REF_DOCTOR_NAME: { $in: doctorNames } } },
+              {
+                $group: {
+                  _id: null,
+                  totalSamples: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $gte: ["$createdAt", { $date: currentStart.toDate() }] },
+                            { $lte: ["$createdAt", { $date: currentEnd.toDate() }] },
+                          ]
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          });
+
+          const periodTotalSamples = totalSamplesAgg.length > 0 ? Number(totalSamplesAgg[0].totalSamples || 0) : 0;
+          overallTotalSamples += periodTotalSamples;
+          
+          // Format products data (only products with samples) if there are any
+          if (productSamplesAgg.length > 0) {
+            const products = productSamplesAgg.map((product: any) => ({
+              productName: product._id,
+              previous: Number(product.previous || 0),
+              current: Number(product.current || 0),
+              percentageChange: Number(product.percentageChange || 0),
+              trend: 
+                Number(product.percentageChange) > 0
+                  ? "increase"
+                  : Number(product.percentageChange) < 0
+                  ? "decrease"
+                  : "stable"
+            }));
+
+            // Create month group
+            const monthGroup = {
+              month: period === "month" ? currentStart.format("MM") : 
+                     period === "year" ? currentStart.format("YYYY") : 
+                     currentStart.format("YYYY-MM-DD"),
+              totalSamples: periodTotalSamples,
+              products: products
+            };
+
+            monthlyData.push(monthGroup);
+          }
+        }
+
+        // Move cursor to next period
+        cursor = cursor.add(1, period as dayjs.OpUnitType);
+      }
+
+      return {
+        success: true,
+        salesperson: decodedEmail,
+        data: monthlyData,
+        metadata: {
+          totalSamples: overallTotalSamples,
+          period: period,
+          dateRange: {
+            start: startDate.toISOString(),
+            end: endDate.toISOString()
+          }
+        }
+      };
+
+    } catch (error: any) {
+      console.error("Error fetching sales summary:", error);
+      c.set.status = 500;
+      return { success: false, message: "Internal Server Error" };
+    }
+  }
+);
+
+
 
 // server running
 app.listen(PORT);
