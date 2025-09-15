@@ -4942,54 +4942,83 @@ app.get(
   async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
     try {
       const { salesPersonEmail } = c.params;
-      const { start, end } = c.query;
+      const { start, end, tags } = c.query; // ✅ get query params directly
 
-      // ✅ Parse dates (fallback = today)
+      // ✅ Parse dates
       const now = dayjs();
-      const startDate = dayjs(start || now).startOf("day");
-      const endDate = dayjs(end || now).endOf("day");
+      const startDate = dayjs(start || now).startOf("day").toDate();
+      const endDate = dayjs(end || now).endOf("day").toDate();
 
-      // ✅ Decode email if provided
-      const decodedEmail = salesPersonEmail
-        ? decodeURIComponent(salesPersonEmail)
+      // ✅ Decode salespersons (support single or multiple, comma-separated)
+      const decodedEmails = salesPersonEmail
+        ? decodeURIComponent(salesPersonEmail).split(",")
         : null;
 
-      // ✅ Use MongoDB aggregate pipeline
-      const visits = await db.visit_Information.aggregateRaw({
-        pipeline: [
-          {
-            $match: {
-              STATUS: { $in: ["COMPLETED", "AD_HOC"] },
-              ...(decodedEmail ? { EMAIL: decodedEmail } : {}),
-              createdAt: {
-                $gte: { $date: startDate.toDate() },
-                $lte: { $date: endDate.toDate() },
-              },
+      // ✅ Decode tags (support single or multiple, comma-separated)
+      const tagFilter = tags ? tags.split(",") : null;
+
+      // 🚀 Handle `/tags` special case
+      if (salesPersonEmail === "tags") {
+        if (tagFilter) {
+          // ✅ fetch only visits matching given tag codes
+          const visits = await db.visit_Information.findMany({
+            where: {
+              STATUS: { in: ["COMPLETED", "AD_HOC"] },
+              ...(decodedEmails ? { EMAIL: { in: decodedEmails } } : {}),
+              createdAt: { gte: startDate, lte: endDate },
+              TAGS: { hasSome: tagFilter }, // ✅ match any of the tags
             },
-          },
-        ],
+          });
+
+          return {
+            success: true,
+            filter: `tags=${tagFilter.join(",")}`,
+            data: visits,
+            metadata: {
+              start: startDate,
+              end: endDate,
+              salespersons: decodedEmails || ["all"],
+              totalVisits: visits.length,
+            },
+          };
+        } else {
+          // ✅ fetch all tags
+          const allTags = await db.tags.findMany({
+            select: { name: true, description: true },
+          });
+
+          return { success: true, tags: allTags };
+        }
+      }
+
+      // ✅ Default: fetch visits (optionally filter by tags and multiple salespersons)
+      const visits = await db.visit_Information.findMany({
+        where: {
+          STATUS: { in: ["COMPLETED", "AD_HOC"] },
+          ...(decodedEmails ? { EMAIL: { in: decodedEmails } } : {}),
+          createdAt: { gte: startDate, lte: endDate },
+          ...(tagFilter ? { TAGS: { hasSome: tagFilter } } : {}), // ✅ multiple tags
+        },
       });
 
       return {
         success: true,
         data: visits,
         metadata: {
-          start: startDate.toISOString(),
-          end: endDate.toISOString(),
-          salesperson: decodedEmail || "all",
+          start: startDate,
+          end: endDate,
+          salespersons: decodedEmails || ["all"],
+          filter: tagFilter ? `tags=${tagFilter.join(",")}` : "none",
           totalVisits: visits.length,
         },
       };
     } catch (error: any) {
-      console.error("Error fetching sales summary:", error);
+      console.error("Error fetching visits:", error);
       c.set.status = 500;
       return { success: false, message: "Internal Server Error" };
     }
   }
 );
-
-
-
 
 // server running
 app.listen(PORT);
