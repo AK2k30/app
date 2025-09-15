@@ -4942,31 +4942,30 @@ app.get(
   async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
     try {
       const { salesPersonEmail } = c.params;
-      const { start, end, tags } = c.query; // ✅ get query params directly
+      const { start, end, tags } = c.query;
 
       // ✅ Parse dates
       const now = dayjs();
       const startDate = dayjs(start || now).startOf("day").toDate();
       const endDate = dayjs(end || now).endOf("day").toDate();
 
-      // ✅ Decode salespersons (support single or multiple, comma-separated)
+      // ✅ Decode salespersons (support multiple, comma-separated)
       const decodedEmails = salesPersonEmail
         ? decodeURIComponent(salesPersonEmail).split(",")
         : null;
 
-      // ✅ Decode tags (support single or multiple, comma-separated)
+      // ✅ Decode tags (support multiple, comma-separated)
       const tagFilter = tags ? tags.split(",") : null;
 
       // 🚀 Handle `/tags` special case
       if (salesPersonEmail === "tags") {
         if (tagFilter) {
-          // ✅ fetch only visits matching given tag codes
           const visits = await db.visit_Information.findMany({
             where: {
               STATUS: { in: ["COMPLETED", "AD_HOC"] },
               ...(decodedEmails ? { EMAIL: { in: decodedEmails } } : {}),
               createdAt: { gte: startDate, lte: endDate },
-              TAGS: { hasSome: tagFilter }, // ✅ match any of the tags
+              TAGS: { hasSome: tagFilter },
             },
           });
 
@@ -4982,7 +4981,6 @@ app.get(
             },
           };
         } else {
-          // ✅ fetch all tags
           const allTags = await db.tags.findMany({
             select: { name: true, description: true },
           });
@@ -4991,13 +4989,27 @@ app.get(
         }
       }
 
-      // ✅ Default: fetch visits (optionally filter by tags and multiple salespersons)
+      // 🚀 Handle `/api/v1/visits/data` with no salesperson param
+      if (!salesPersonEmail) {
+        const allEmails = await db.visit_Information.findMany({
+          distinct: ["EMAIL"], // ✅ Prisma distinct
+          select: { EMAIL: true },
+        });
+
+        return {
+          success: true,
+          salespersons: allEmails.map((d) => ({ email: d.EMAIL })), // ✅ updated format
+          totalSalespersons: allEmails.length,
+        };
+      }
+
+      // ✅ Default: fetch visits (with optional filters)
       const visits = await db.visit_Information.findMany({
         where: {
           STATUS: { in: ["COMPLETED", "AD_HOC"] },
           ...(decodedEmails ? { EMAIL: { in: decodedEmails } } : {}),
           createdAt: { gte: startDate, lte: endDate },
-          ...(tagFilter ? { TAGS: { hasSome: tagFilter } } : {}), // ✅ multiple tags
+          ...(tagFilter ? { TAGS: { hasSome: tagFilter } } : {}),
         },
       });
 
