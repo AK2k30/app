@@ -1005,6 +1005,187 @@ app.get(`/api/v1/visit/hospitals`, async (c: Context) => {
   }
 });
 
+// API endpoint for getting visits by date range with MongoDB aggregation
+app.get(`/api/v1/visit/date-range`, async (c: Context) => {
+  try {
+    const userDetails = c.store.userDetails || {};
+
+    if (!userDetails?.currentRole || !userDetails?.email) {
+      c.set.status = 401;
+      return {
+        status: 401,
+        success: false,
+        message: "Unauthorized - User authentication required",
+      };
+    }
+
+    const { startDate, endDate } = c.query as { startDate?: string; endDate?: string };
+
+    if (!startDate || !endDate) {
+      c.set.status = 400;
+      return {
+        status: 400,
+        success: false,
+        message: "Both startDate and endDate parameters are required (format: YYYY-MM-DD)",
+      };
+    }
+
+    const startDt = dayjs(startDate);
+    const endDt = dayjs(endDate);
+
+    if (!startDt.isValid() || !endDt.isValid()) {
+      c.set.status = 400;
+      return {
+        status: 400,
+        success: false,
+        message: "Invalid date format. Please use YYYY-MM-DD format",
+      };
+    }
+
+    const endOfDay = endDt.endOf("day");
+
+    // Base match stage
+    let matchStage: any = {
+      createdAt: {
+        $gte: startDt.toDate(),
+        $lte: endOfDay.toDate(),
+      },
+    };
+
+    // Apply role-based filtering from utility
+    matchStage = await applyRoleFilter(userDetails, matchStage, "visit_Information");
+
+    console.log("🔍 DEBUG: Final match stage for pipeline:", JSON.stringify(matchStage, null, 2));
+
+    const pipeline = [
+      { $match: matchStage },
+
+      {
+        $addFields: {
+          visitDate: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          visitDuration: {
+            $cond: [
+              { $and: ["$IN_DATETIME", "$OUT_DATETIME"] },
+              { $divide: [{ $subtract: ["$OUT_DATETIME", "$IN_DATETIME"] }, 1000 * 60] },
+              null,
+            ],
+          },
+        },
+      },
+
+      {
+        $group: {
+          _id: { date: "$visitDate", email: "$EMAIL", salesPerson: "$YOUR_NAME" },
+          totalVisits: { $sum: 1 },
+          totalDuration: {
+            $sum: { $cond: [{ $ifNull: ["$visitDuration", false] }, "$visitDuration", 0] },
+          },
+          validDurations: {
+            $sum: { $cond: [{ $ifNull: ["$visitDuration", false] }, 1, 0] },
+          },
+          visits: {
+            $push: {
+              haplId: "$HAPLID",
+              doctorName: "$DOCTOR_NAME",
+              hospitalName: "$HOSPITAL_NAME",
+              clientName: "$CLIENT_NAME",
+              visitType: "$VISIT_TYPE",
+              status: "$STATUS",
+              inDateTime: "$IN_DATETIME",
+              outDateTime: "$OUT_DATETIME",
+              visitDuration: "$visitDuration",
+              geolocation: "$GEOLOCATION",
+              visitHighlights: "$VISIT_OR_CALL_HIGHLIGHTS",
+              nextSteps: "$NEXT_STEPS",
+            },
+          },
+        },
+      },
+
+      {
+        $group: {
+          _id: "$_id.date",
+          totalVisitsForDate: { $sum: "$totalVisits" },
+          salesPersonStats: {
+            $push: {
+              email: "$_id.email",
+              salesPerson: "$_id.salesPerson",
+              totalVisits: "$totalVisits",
+              visits: "$visits",
+              avgVisitDuration: {
+                $cond: [
+                  { $gt: ["$validDurations", 0] },
+                  { $divide: ["$totalDuration", "$validDurations"] },
+                  null,
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      {
+        $project: {
+          _id: 0,
+          date: "$_id",
+          totalVisitsForDate: 1,
+          salesPersonStats: 1,
+        },
+      },
+
+      { $sort: { date: -1 } },
+    ];
+
+    const rawAgg = await db.$runCommandRaw({
+      aggregate: "visit_Information",
+      pipeline,
+      cursor: {},
+    });
+
+    const visitData = rawAgg.cursor.firstBatch;
+
+    // Calculate summary
+    const totalVisits = visitData.reduce((acc, day) => acc + day.totalVisitsForDate, 0);
+    const totalDays = visitData.length;
+    const avgVisitsPerDay = totalDays > 0 ? parseFloat((totalVisits / totalDays).toFixed(2)) : 0;
+
+    // Extract unique sales persons
+    const salesPersonsSet = new Set<string>();
+    visitData.forEach((day: any) => {
+      day.salesPersonStats.forEach((sp: any) => salesPersonsSet.add(sp.salesPerson || "Unknown"));
+    });
+
+    const uniqueSalesPersons = Array.from(salesPersonsSet);
+
+    c.set.status = 200;
+    return {
+      status: 200,
+      success: true,
+      data: {
+        dateRange: { startDate, endDate },
+        summary: {
+          totalVisits,
+          totalDays,
+          avgVisitsPerDay,
+          uniqueSalesPersons: uniqueSalesPersons.length,
+          salesPersonsList: uniqueSalesPersons,
+        },
+        dailyVisitData: visitData,
+      },
+      message: `Visit information retrieved successfully for date range ${startDate} to ${endDate}. Found ${totalVisits} visits across ${totalDays} days.`,
+    };
+  } catch (error: any) {
+    console.error("❌ Error fetching visits by date range:", error);
+    c.set.status = 500;
+    return {
+      status: 500,
+      success: false,
+      message: error.message || "Internal Server Error while fetching visit information by date range",
+    };
+  }
+});
+
+
 // API endpoint for getting visited doctors
 app.get(`/api/v1/visit/doctors`, async (c: Context) => {
   try {
@@ -4755,6 +4936,59 @@ app.get(
     }
   }
 );
+
+app.get(
+  "/api/v1/visits/data/:salesPersonEmail?",
+  async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
+    try {
+      const { salesPersonEmail } = c.params;
+      const { start, end } = c.query;
+
+      // ✅ Parse dates (fallback = today)
+      const now = dayjs();
+      const startDate = dayjs(start || now).startOf("day");
+      const endDate = dayjs(end || now).endOf("day");
+
+      // ✅ Decode email if provided
+      const decodedEmail = salesPersonEmail
+        ? decodeURIComponent(salesPersonEmail)
+        : null;
+
+      // ✅ Use MongoDB aggregate pipeline
+      const visits = await db.visit_Information.aggregateRaw({
+        pipeline: [
+          {
+            $match: {
+              STATUS: { $in: ["COMPLETED", "AD_HOC"] },
+              ...(decodedEmail ? { EMAIL: decodedEmail } : {}),
+              createdAt: {
+                $gte: { $date: startDate.toDate() },
+                $lte: { $date: endDate.toDate() },
+              },
+            },
+          },
+        ],
+      });
+
+      return {
+        success: true,
+        data: visits,
+        metadata: {
+          start: startDate.toISOString(),
+          end: endDate.toISOString(),
+          salesperson: decodedEmail || "all",
+          totalVisits: visits.length,
+        },
+      };
+    } catch (error: any) {
+      console.error("Error fetching sales summary:", error);
+      c.set.status = 500;
+      return { success: false, message: "Internal Server Error" };
+    }
+  }
+);
+
+
 
 
 // server running
