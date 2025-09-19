@@ -12,6 +12,12 @@ import {
 import { applyRoleFilter } from "./utils/roleFilter";
 import { jwt } from "./utils/jwt";
 import dayjs from "dayjs";
+import weekOfYear from "dayjs/plugin/weekOfYear"
+import quarterOfYear from "dayjs/plugin/quarterOfYear"
+
+// ✅ enable plugins
+dayjs.extend(weekOfYear)
+dayjs.extend(quarterOfYear)
 
 const db = new PrismaClient();
 
@@ -2968,6 +2974,92 @@ app.get("/api/v1/doctor/products-summary", async (c: Context) => {
   }
 });
 
+// app.get(
+//   "/api/v1/visits/summary",
+//   async (c: Context) => {
+//     try {
+//       const { start, end } = c.query
+
+//       // Parse dates
+//       const now = dayjs()
+//       const startDate = dayjs(start || now).startOf("day").toDate()
+//       const endDate = dayjs(end || now).endOf("day").toDate()
+
+//       // Fetch visits from DB
+//       const visits = await db.visit_Information.findMany({
+//         where: {
+//           createdAt: { gte: startDate, lte: endDate },
+//         },
+//         select: {
+//           HAPLID: true,
+//           TAGS: true,
+//           UserEmail: true,
+//           EMAIL: true,
+//           // CITY: true,
+//           ORGANIZATION_ID: true,
+//           CUSTOMER_ID: true,
+//           HOSPITAL_NAME: true,
+//           DOCTOR_NAME: true,
+//           createdAt: true,
+//         },
+//       })
+
+//       // Group by HAPLID
+//       const groupedData = visits.reduce((acc, v) => {
+//         const d = dayjs(v.createdAt)
+//         const key = v.HAPLID
+
+//         if (!acc[key]) {
+//           acc[key] = {
+//             date: v.createdAt, // keep raw Date object
+//             year: d.year(),
+//             month: d.month() + 1, // numeric month
+//             week: d.week(),
+//             quarter: d.quarter(),
+//             HAPLID: v.HAPLID,
+//             tagsid: [],
+//             useremailid: v.UserEmail,
+//             useremail: v.EMAIL,
+//             // city: v.CITY,
+//             organizationid: v.ORGANIZATION_ID,
+//             hospitalname: v.HOSPITAL_NAME,
+//             customerid: v.CUSTOMER_ID,
+//             doctorname: v.DOCTOR_NAME,
+//           }
+//         }
+
+//         // Add tags into array
+//         if (v.TAGS && Array.isArray(v.TAGS)) {
+//           v.TAGS.forEach((tag, idx) => {
+//             acc[key].tagsid.push({
+//               tagid: `P${idx + 1}`,
+//               tagname: tag,
+//             })
+//           })
+//         }
+
+//         return acc
+//       }, {} as Record<string, any>)
+
+//       const data = Object.values(groupedData)
+
+//       return {
+//         success: true,
+//         data,
+//         metadata: {
+//           start: startDate,
+//           end: endDate,
+//           total: data.length,
+//         },
+//       }
+//     } catch (error: any) {
+//       console.error("Error fetching visits summary:", error)
+//       c.set.status = 500
+//       return { success: false, message: "Internal Server Error" }
+//     }
+//   }
+// )
+
 //<------------------------------------------New Endpoint: Sales Summary with Aggregations------------------------------------------>
 
 app.get(
@@ -4937,6 +5029,8 @@ app.get(
   }
 );
 
+//------------------- VISITS DATA FILTER ENDPOINT ------------------//
+
 app.get(
   "/api/v1/visits/data/:salesPersonEmail?",
   async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
@@ -4957,7 +5051,6 @@ app.get(
       // ✅ Decode tags (support multiple, comma-separated)
       const tagFilter = tags ? tags.split(",") : null;
 
-      // 🚀 Handle `/tags` special case
       if (salesPersonEmail === "tags") {
         if (tagFilter) {
           const visits = await db.visit_Information.findMany({
@@ -4989,21 +5082,19 @@ app.get(
         }
       }
 
-      // 🚀 Handle `/api/v1/visits/data` with no salesperson param
       if (!salesPersonEmail) {
         const allEmails = await db.visit_Information.findMany({
-          distinct: ["EMAIL"], // ✅ Prisma distinct
+          distinct: ["EMAIL"], 
           select: { EMAIL: true },
         });
 
         return {
           success: true,
-          salespersons: allEmails.map((d) => ({ email: d.EMAIL })), // ✅ updated format
+          salespersons: allEmails.map((d) => ({ email: d.EMAIL })),
           totalSalespersons: allEmails.length,
         };
       }
 
-      // ✅ Default: fetch visits (with optional filters)
       const visits = await db.visit_Information.findMany({
         where: {
           STATUS: { in: ["COMPLETED", "AD_HOC"] },
@@ -5031,6 +5122,193 @@ app.get(
     }
   }
 );
+
+app.get(
+  "/api/v1/samples/data/:salesPersonEmail?",
+  async (c: Context<{ params: { salesPersonEmail?: string } }>) => {
+    try {
+      const { salesPersonEmail } = c.params;
+      const { start, end, product, customerType } = c.query;
+
+      // ✅ Parse dates
+      const now = dayjs();
+      const startDate = dayjs(start || now).startOf("day").toDate();
+      const endDate = dayjs(end || now).endOf("day").toDate();
+
+      // ✅ Decode salespersons (support multiple, comma-separated)
+      const decodedEmails = salesPersonEmail
+        ? decodeURIComponent(salesPersonEmail).split(",")
+        : null;
+
+      // ✅ Decode product (support multiple, comma-separated)
+      const productFilter = product ? product.split(",") : null;
+
+      // 🚀 Handle `/product` special case (list all products)
+      if (salesPersonEmail === "product") {
+        if (productFilter) {
+          const visits = await db.sample_Details.findMany({
+            where: {
+              ...(decodedEmails ? { SALESSPOC_ID: { in: decodedEmails } } : {}),
+              REGISTRATION_DATE: { gte: startDate, lte: endDate },
+              PRODUCT: { in: productFilter },
+              ...(customerType ? { CUSTOMER_TYPE: customerType } : {}),
+            },
+          });
+
+          return {
+            success: true,
+            filter: `product=${productFilter.join(",")}`,
+            data: visits,
+            metadata: {
+              start: startDate,
+              end: endDate,
+              salespersons: decodedEmails || ["all"],
+              customerType: customerType || "all",
+              totalVisits: visits.length,
+            },
+          };
+        } else {
+          // return all distinct products
+          const allProducts = await db.sample_Details.findMany({
+            distinct: ["PRODUCT"],
+            select: { PRODUCT: true },
+          });
+
+          return {
+            success: true,
+            products: allProducts.map((p) => ({ name: p.PRODUCT })),
+          };
+        }
+      }
+
+      // 🚀 Handle `/api/v1/samples/data` with no salesperson param
+      if (!salesPersonEmail) {
+        const allEmails = await db.sample_Details.findMany({
+          distinct: ["SALESSPOC_ID"],
+          select: { SALESSPOC_ID: true },
+        });
+
+        return {
+          success: true,
+          salespersons: allEmails.map((d) => ({ email: d.SALESSPOC_ID })),
+          totalSalespersons: allEmails.length,
+        };
+      }
+
+      // ✅ Default: fetch visits (with optional filters)
+      const visits = await db.sample_Details.findMany({
+        where: {
+          ...(decodedEmails ? { SALESSPOC_ID: { in: decodedEmails } } : {}),
+          REGISTRATION_DATE: { gte: startDate, lte: endDate },
+          ...(productFilter ? { PRODUCT: { in: productFilter } } : {}),
+          ...(customerType ? { CUSTOMER_TYPE: customerType } : {}),
+        },
+      });
+
+      return {
+        success: true,
+        data: visits,
+        metadata: {
+          start: startDate,
+          end: endDate,
+          salespersons: decodedEmails || ["all"],
+          filter: productFilter ? `product=${productFilter.join(",")}` : "none",
+          customerType: customerType || "all",
+          totalVisits: visits.length,
+        },
+      };
+    } catch (error: any) {
+      console.error("Error fetching visits:", error);
+      c.set.status = 500;
+      return { success: false, message: "Internal Server Error" };
+    }
+  }
+);
+
+//------------------- NEW API ENDPOINT ------------------//
+
+app.get(
+  "/api/v1/samples/summary",
+  async (c: Context) => {
+    try {
+      const { start, end } = c.query
+
+      // Parse dates
+      const now = dayjs()
+      const startDate = dayjs(start || now).startOf("day").toDate()
+      const endDate = dayjs(end || now).endOf("day").toDate()
+
+      // Fetch from DB
+      const samples = await db.sample_Details.findMany({
+        where: {
+          createdAt: { gte: startDate, lte: endDate },
+        },
+        select: {
+          SAMPLE_HAPL_ID: true,
+          PRODUCT_ID: true,
+          PRODUCT: true,
+          SALESSPOC_ID: true,
+          SALESSPOC_NAME: true,
+          CITY: true,
+          ORGANISATION_ID: true,
+          ORGANISATION_NAME: true,
+          CUSTOMER_ID: true,
+          CUSTOMER_NAME: true,
+          createdAt: true,
+        },
+      })
+
+      // Group by SAMPLE_HAPL_ID
+      const groupedData = samples.reduce((acc, s) => {
+        const d = dayjs(s.createdAt)
+        const key = s.SAMPLE_HAPL_ID
+
+        if (!acc[key]) {
+          acc[key] = {
+            date: s.createdAt, 
+            year: d.year(),  
+            month: d.month() + 1, 
+            week: d.week(),    
+            quarter: d.quarter(), 
+            sampleHAPLID: s.SAMPLE_HAPL_ID,
+            products: [],
+            salespocid: s.SALESSPOC_ID,
+            salespocname: s.SALESSPOC_NAME,
+            city: s.CITY,
+            organizationid: s.ORGANISATION_ID,
+            organizationname: s.ORGANISATION_NAME,
+            customerid: s.CUSTOMER_ID,
+            customername: s.CUSTOMER_NAME,
+          }
+        }
+
+        // Add product to array
+        acc[key].products.push({
+          productid: s.PRODUCT_ID,
+          productname: s.PRODUCT,
+        })
+
+        return acc
+      }, {} as Record<string, any>)
+
+      const data = Object.values(groupedData)
+
+      return {
+        success: true,
+        data,
+        metadata: {
+          start: startDate,
+          end: endDate,
+          total: data.length,
+        },
+      }
+    } catch (error: any) {
+      console.error("Error fetching summary:", error)
+      c.set.status = 500
+      return { success: false, message: "Internal Server Error" }
+    }
+  }
+)
 
 // server running
 app.listen(PORT);

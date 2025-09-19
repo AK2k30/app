@@ -1,16 +1,17 @@
 const { Then } = require('@cucumber/cucumber');
 const assert = require('assert');
 
+// Products summary specific steps for different entities
 Then('each salesperson products summary item should have the following fields:', function (dataTable) {
-  validateItems(this.responseData, dataTable);
+  validateProductsSummaryItems(this.responseData, dataTable);
 });
 
 Then('each organisation products summary item should have the following fields:', function (dataTable) {
-  validateItems(this.responseData, dataTable);
+  validateProductsSummaryItems(this.responseData, dataTable);
 });
 
 Then('each doctor products summary item should have the following fields:', function (dataTable) {
-  validateItems(this.responseData, dataTable);
+  validateProductsSummaryItems(this.responseData, dataTable);
 });
 
 Then('the metadata should include products summary fields', function () {
@@ -24,7 +25,8 @@ Then('the metadata should include products summary fields', function () {
   assert(m.period && typeof m.period === 'string', 'Metadata should include period');
 });
 
-function validateItems(responseData, dataTable) {
+// Helper function for products summary validation
+function validateProductsSummaryItems(responseData, dataTable) {
   assert(responseData && Array.isArray(responseData.data), 'Response data should be an array');
   const expectedFields = dataTable.hashes();
 
@@ -49,5 +51,3 @@ function validateItems(responseData, dataTable) {
     });
   });
 }
-
-

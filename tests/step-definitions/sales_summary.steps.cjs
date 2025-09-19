@@ -1,12 +1,7 @@
 const { Then } = require('@cucumber/cucumber');
 const assert = require('assert');
 
-Then('the response should be successful', function () {
-  assert(this.responseData, 'Response data should exist');
-  assert.strictEqual(typeof this.responseData.success, 'boolean');
-  assert(this.responseData.success, 'Response should indicate success');
-});
-
+// Sales summary specific steps
 Then('each sales doctor summary item should have the following fields:', function (dataTable) {
   assert(this.responseData && Array.isArray(this.responseData.data), 'Response data should be an array');
   const expectedFields = dataTable.hashes();

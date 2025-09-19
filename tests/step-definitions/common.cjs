@@ -31,6 +31,7 @@ After(async function () {
   this.authToken = null;
 });
 
+// Common Given steps
 Given('the API server is running', async function () {
   // Check if the server is running by making a simple request to a protected endpoint
   try {
@@ -83,8 +84,7 @@ Given('I am authenticated as a valid user', async function () {
   }
 });
 
-
-
+// Common When steps
 When('I send a GET request to {string}', async function (endpoint) {
   const headers = {
     'Content-Type': 'application/json'
@@ -106,12 +106,11 @@ When('I send a GET request to {string}', async function (endpoint) {
   }
 });
 
+// Common Then steps
 Then('the response status should be {int}', function (expectedStatus) {
   assert.strictEqual(this.response.status, expectedStatus,
     `Expected status ${expectedStatus}, but got ${this.response.status}`);
 });
-
-
 
 Then('the response should have the following structure:', function (dataTable) {
   assert(this.responseData, 'Response data should exist');
@@ -140,7 +139,11 @@ Then('the response should have the following structure:', function (dataTable) {
   });
 });
 
-
+Then('the response should be successful', function () {
+  assert(this.responseData, 'Response data should exist');
+  assert.strictEqual(typeof this.responseData.success, 'boolean');
+  assert(this.responseData.success, 'Response should indicate success');
+});
 
 module.exports = {
   testCredentials,
